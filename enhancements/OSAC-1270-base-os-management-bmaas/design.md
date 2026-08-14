@@ -90,25 +90,9 @@ sequenceDiagram
 
 The diagram shows the two-phase flow: the API validates the DiskImage reference and persists the BareMetalInstance, then the reconciler resolves `source_ref` and passes it as `imageURL` to the provisioning template. The operator CRD carries no image field — the image URL is injected as a JSON template parameter.
 
-**Steps:**
-
-1. User calls `BareMetalInstances/Create` with `spec.disk_image` set (or omits it if the CatalogItem carries a default).
-2. Server calls `validateAndApplyCatalogItem()`, which calls `applyFieldDefinitions()`. If the CatalogItem's `field_definitions` include a `spec.disk_image` entry and the user did not provide one, the default is applied.
-3. Server validates `spec.disk_image` is set — returns `InvalidArgument` if missing after defaults are applied.
-4. Server fetches the referenced DiskImage. Returns `NotFound` if absent.
-5. Server validates tenant visibility (global DiskImage or same tenant). Returns `PermissionDenied` if inaccessible.
-6. Server validates lifecycle is not `DISK_IMAGE_LIFECYCLE_OBSOLETE`. Returns `FailedPrecondition` with message: `"cannot create bare metal instance: disk image is obsolete"`.
-7. If lifecycle is `DISK_IMAGE_LIFECYCLE_DEPRECATED`, a warning is appended to `BareMetalInstancesCreateResponse.warnings`: `"disk image '<id>' is deprecated"`.
-8. Server persists the BareMetalInstance with the `disk_image` reference.
-9. The reconciler fetches the DiskImage's `spec.source_ref` and injects it as `params["imageURL"]` in the JSON template parameters written to `BareMetalInstanceSpec.templateParameters` on the CRD.
-10. The operator passes `templateParameters` to the AAP provisioning role, which reads `template_params.imageURL` to set the boot image.
-
 #### Deleting a DiskImage referenced by a BareMetalInstance
 
-1. Admin calls `DiskImages/Delete`.
-2. The BEFORE UPDATE trigger on `disk_images` fires and queries `bare_metal_instances` for active references (`deletion_timestamp = 'epoch'`).
-3. If any exist, the trigger raises SQLSTATE `Z0003`. The DAO translates this to `FailedPrecondition` with a message identifying the referencing resource.
-4. Admin deletes or reprovisioned the referencing BareMetalInstances, then retries deletion.
+Admin calls `DiskImages/Delete`. If any active BareMetalInstances or BareMetalInstanceCatalogItems reference the DiskImage, deletion fails with `FailedPrecondition`. Admin removes the referencing resources and retries.
 
 ### API Extensions
 
@@ -215,171 +199,6 @@ message BareMetalInstanceTemplateSpecDefaults {
 ```
 
 Both changes must be duplicated for the public (`proto/public/osac/public/v1/`) and private (`proto/private/osac/private/v1/`) APIs, following the OSAC convention.
-
-#### Server: BareMetalInstance Create Handler
-
-`PrivateBareMetalInstancesServer.Create()` gains a DiskImage validation step between `validateAndApplyCatalogItem()` and `validateSpec()`:
-
-1. If `spec.disk_image` is empty after `applyFieldDefinitions()`, return `InvalidArgument`: `"spec.disk_image is required"`.
-2. Fetch the DiskImage via `diskImagesDao.Get()`. On `ErrNotFound`, return `NotFound`.
-3. Validate tenant visibility: the DiskImage must have an empty `metadata.tenant` (global) or match the caller's tenant. Return `PermissionDenied` on violation.
-4. Validate `spec.lifecycle != DISK_IMAGE_LIFECYCLE_OBSOLETE`. Return `FailedPrecondition` on violation.
-5. If `spec.lifecycle == DISK_IMAGE_LIFECYCLE_DEPRECATED`, append `"disk image '<id>' is deprecated"` to `response.warnings`.
-
-`PrivateBareMetalInstancesServer` gains a `diskImagesDao *dao.GenericDAO[*privatev1.DiskImage]` field, initialized in `Build()` following the same pattern as `catalogItemsDao`.
-
-`validateBareMetalInstanceImage()` and its call in `validateSpec()` are removed. `applyBareMetalInstanceSpecDefaults()` is simplified by removing image merging — the function body becomes a no-op (or is removed entirely if no other defaults remain). `validateImmutability()` drops the `spec.image` check and adds `spec.disk_image` as an immutable field.
-
-#### Server: BareMetalInstanceCatalogItem Validation
-
-`PrivateBareMetalInstanceCatalogItemsServer.Create()` and `Update()` gain a `validateFieldDefinitionsDiskImage()` call, following the pattern from `PrivateComputeInstanceCatalogItemsServer`. The function scans `field_definitions` for entries targeting `spec.disk_image`, extracts the default value, and validates:
-
-1. The referenced DiskImage exists — fetched with `FOR SHARE` within the same transaction as the catalog-item insert/update, holding the lock until commit. This prevents a concurrent DiskImage deletion from succeeding between the existence check and the catalog-item commit (TOCTOU protection).
-2. The DiskImage is visible to the CatalogItem's tenant (global or same tenant).
-3. The DiskImage lifecycle is not `DISK_IMAGE_LIFECYCLE_OBSOLETE`.
-4. If `DISK_IMAGE_LIFECYCLE_DEPRECATED`, the validation appends a warning. Warnings are returned in `BareMetalInstanceCatalogItemsCreateResponse.warnings` / `BareMetalInstanceCatalogItemsUpdateResponse.warnings`.
-
-A database trigger for catalog-item write protection is impractical: `field_definitions` stores values as opaque `google.protobuf.Value` JSONB, and DiskImage IDs cannot be reliably extracted without knowing the serialization format. The application-level `FOR SHARE` approach provides equivalent TOCTOU protection within the transaction.
-
-[Codebase: `osac/fulfillment-service/internal/servers/private_baremetal_instance_catalog_items_server.go`]
-
-#### Reconciler: DiskImage Resolution
-
-`mutateBMI()` in `baremetalinstance_reconciler_function.go` replaces the current image injection block:
-
-**Current:**
-```go
-if t.bareMetalInstance.GetSpec().HasImage() {
-    params["imageURL"] = t.bareMetalInstance.GetSpec().GetImage().GetSourceRef()
-}
-```
-
-**New:**
-```go
-if diskImageID := t.bareMetalInstance.GetSpec().GetDiskImage(); diskImageID != "" {
-    resp, err := t.r.diskImagesClient.Get(ctx,
-        privatev1.DiskImagesGetRequest_builder{Id: diskImageID}.Build())
-    if err != nil {
-        return fmt.Errorf("failed to fetch disk image %q: %w", diskImageID, err)
-    }
-    params["imageURL"] = resp.GetObject().GetSpec().GetSourceRef()
-}
-```
-
-The `function` struct gains a `diskImagesClient privatev1.DiskImagesClient` field, initialized via `privatev1.NewDiskImagesClient(b.connection)` in `FunctionBuilder.Build()`.
-
-`guest_os_family` is not extracted or passed — the AAP provisioning roles do not use it for bare-metal provisioning. [Codebase: `osac/osac-aap/collections/ansible_collections/osac/templates/roles/bm_host_provisioning/tasks/build_bmh_patch.yaml`]
-
-#### Database Migration
-
-A new migration extends DiskImage deletion protection to bare-metal resources. This migration must run after OSAC-2540's DiskImage table migration.
-
-**Index on `bare_metal_instances`:**
-
-```sql
-CREATE INDEX bare_metal_instances_disk_image ON bare_metal_instances ((data->'spec'->>'disk_image'))
-  WHERE data->'spec'->>'disk_image' IS NOT NULL;
-```
-
-**Extended `check_disk_image_not_in_use` trigger:**
-
-The existing trigger function (from OSAC-2540) is replaced with an extended version that also queries `bare_metal_instances` and `bare_metal_instance_catalog_items`:
-
-```sql
-DROP TRIGGER check_disk_image_not_in_use ON disk_images;
-DROP FUNCTION check_disk_image_not_in_use;
-
-CREATE FUNCTION check_disk_image_not_in_use() RETURNS trigger AS $$
-DECLARE
-  ref_id text;
-BEGIN
-  -- Check compute_instances
-  SELECT id INTO ref_id FROM compute_instances
-    WHERE deletion_timestamp = 'epoch' AND data->'spec'->>'diskImage' = OLD.id LIMIT 1;
-  IF ref_id IS NOT NULL THEN
-    RAISE EXCEPTION USING errcode = 'Z0003',
-      message = format('cannot delete disk image ''%s'': in use by compute instance ''%s''', OLD.id, ref_id);
-  END IF;
-
-  -- Check compute_instance_templates
-  SELECT id INTO ref_id FROM compute_instance_templates
-    WHERE deletion_timestamp = 'epoch' AND data->'specDefaults'->>'diskImage' = OLD.id LIMIT 1;
-  IF ref_id IS NOT NULL THEN
-    RAISE EXCEPTION USING errcode = 'Z0003',
-      message = format('cannot delete disk image ''%s'': in use by compute instance template ''%s''', OLD.id, ref_id);
-  END IF;
-
-  -- Check compute_instance_catalog_items (text search — opaque field_definitions)
-  SELECT id INTO ref_id FROM compute_instance_catalog_items
-    WHERE deletion_timestamp = 'epoch' AND data::text LIKE '%' || OLD.id || '%' LIMIT 1;
-  IF ref_id IS NOT NULL THEN
-    RAISE EXCEPTION USING errcode = 'Z0003',
-      message = format('cannot delete disk image ''%s'': in use by compute instance catalog item ''%s''', OLD.id, ref_id);
-  END IF;
-
-  -- Check bare_metal_instances
-  SELECT id INTO ref_id FROM bare_metal_instances
-    WHERE deletion_timestamp = 'epoch' AND data->'spec'->>'disk_image' = OLD.id LIMIT 1;
-  IF ref_id IS NOT NULL THEN
-    RAISE EXCEPTION USING errcode = 'Z0003',
-      message = format('cannot delete disk image ''%s'': in use by bare metal instance ''%s''', OLD.id, ref_id);
-  END IF;
-
-  -- Check bare_metal_instance_catalog_items (text search — opaque field_definitions)
-  SELECT id INTO ref_id FROM bare_metal_instance_catalog_items
-    WHERE deletion_timestamp = 'epoch' AND data::text LIKE '%' || OLD.id || '%' LIMIT 1;
-  IF ref_id IS NOT NULL THEN
-    RAISE EXCEPTION USING errcode = 'Z0003',
-      message = format('cannot delete disk image ''%s'': in use by bare metal instance catalog item ''%s''', OLD.id, ref_id);
-  END IF;
-
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER check_disk_image_not_in_use
-  BEFORE UPDATE ON disk_images
-  FOR EACH ROW
-  WHEN (OLD.deletion_timestamp = 'epoch' AND NEW.deletion_timestamp != 'epoch')
-  EXECUTE FUNCTION check_disk_image_not_in_use();
-```
-
-**BEFORE INSERT OR UPDATE trigger on `bare_metal_instances`:**
-
-```sql
-CREATE FUNCTION check_bare_metal_instance_disk_image_ref() RETURNS trigger AS $$
-DECLARE
-  di_id text;
-  found_id text;
-BEGIN
-  di_id := NEW.data->'spec'->>'disk_image';
-  IF coalesce(di_id, '') = '' THEN
-    RETURN NEW;
-  END IF;
-
-  SELECT id INTO found_id FROM disk_images
-    WHERE id = di_id AND deletion_timestamp = 'epoch'
-    FOR SHARE;
-
-  IF found_id IS NULL THEN
-    RAISE EXCEPTION USING errcode = 'Z0002',
-      message = format('disk image ''%s'' does not exist or has been deleted', di_id);
-  END IF;
-
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER check_bare_metal_instance_disk_image_ref
-  BEFORE INSERT OR UPDATE ON bare_metal_instances
-  FOR EACH ROW
-  WHEN (NEW.deletion_timestamp = 'epoch')
-  EXECUTE FUNCTION check_bare_metal_instance_disk_image_ref();
-```
-
-The `FOR SHARE` lock on `disk_images` prevents a concurrent soft-delete from succeeding between the trigger's existence check and the BareMetalInstance row commit — matching the bidirectional locking pattern from OSAC-2540. [Codebase: `osac/fulfillment-service/internal/database/migrations/56_add_instance_type_ref_triggers.up.sql`]
-
-Note on the JSONB key for `disk_image` in `bare_metal_instances`: the trigger uses `data->'spec'->>'disk_image'` (snake_case), consistent with how `instance_type` is accessed in the existing instance type trigger (`data->'spec'->>'instance_type'`). The compute_instances checks above use camelCase (`diskImage`, `specDefaults`) as specified in OSAC-2540 — implementors must verify both against actual JSONB storage before applying. [Codebase: `osac/fulfillment-service/internal/database/migrations/56_add_instance_type_ref_triggers.up.sql`]
 
 ### Security Considerations
 
@@ -538,9 +357,9 @@ This is a breaking API change (removal of `BareMetalInstanceSpec.image`). OSAC d
 - Any `BareMetalInstanceCatalogItem.field_definitions` carrying `spec.image` defaults must be updated to use `spec.disk_image` before upgrade; the `image` field is not recognized after upgrade.
 
 **Downgrade steps:**
-1. Delete all BareMetalInstances created with `spec.disk_image` (these cannot be represented in the prior schema).
-2. Revert the database migration: the down migration must recreate OSAC-2540's original `check_disk_image_not_in_use` function (covering only compute resources) and trigger before removing the BMaaS additions — removing the trigger entirely is incorrect, as compute resource deletion protection must remain. Then drop `check_bare_metal_instance_disk_image_ref` and the `bare_metal_instances_disk_image` index.
-3. Redeploy the prior service binary (reverts proto and server changes).
+- Delete all BareMetalInstances created with `spec.disk_image` (these cannot be represented in the prior schema).
+- Revert the database migration: the down migration must recreate OSAC-2540's original `check_disk_image_not_in_use` function (covering only compute resources) and trigger before removing the BMaaS additions — removing the trigger entirely is incorrect, as compute resource deletion protection must remain.
+- Redeploy the prior service binary (reverts proto and server changes).
 
 Existing provisioned BareMetalInstances (already RUNNING) at upgrade time have no `disk_image` reference. These instances are unaffected — running hosts do not require re-reconciliation and the reconciler only injects `imageURL` when `disk_image` is set.
 
