@@ -90,26 +90,42 @@ sequenceDiagram
 
 The diagram shows the two-phase flow: the API validates the DiskImage reference and persists the BareMetalInstance, then the reconciler resolves `source_ref` and passes it as `imageURL` to the provisioning template. The operator CRD carries no image field — the image URL is injected as a JSON template parameter.
 
+**Steps:**
+
+1. User calls `BareMetalInstances/Create` with `spec.disk_image` set (or omits it if the CatalogItem carries a default).
+2. Server calls `validateAndApplyCatalogItem()`, which calls `applyFieldDefinitions()`. If the CatalogItem's `field_definitions` include a `spec.disk_image` entry and the user did not provide one, the default is applied.
+3. Server validates `spec.disk_image` is set — returns `InvalidArgument` if missing after defaults are applied.
+4. Server fetches the referenced DiskImage. Returns `NotFound` if absent.
+5. Server validates tenant visibility (global DiskImage or same tenant). Returns `PermissionDenied` if inaccessible.
+6. Server validates lifecycle is not `DISK_IMAGE_LIFECYCLE_OBSOLETE`. Returns `FailedPrecondition` with message: `"cannot create bare metal instance: disk image is obsolete"`.
+7. If lifecycle is `DISK_IMAGE_LIFECYCLE_DEPRECATED`, a warning is appended to `BareMetalInstancesCreateResponse.warnings`: `"disk image '<id>' is deprecated"`.
+8. Server persists the BareMetalInstance with the `disk_image` reference.
+9. The reconciler fetches the DiskImage's `spec.source_ref` and injects it as `params["imageURL"]` in the JSON template parameters written to `BareMetalInstanceSpec.templateParameters` on the CRD.
+10. The operator passes `templateParameters` to the AAP provisioning role, which reads `template_params.imageURL` to set the boot image.
+
 #### Deleting a DiskImage referenced by a BareMetalInstance
 
-Admin calls `DiskImages/Delete`. If any active BareMetalInstances or BareMetalInstanceCatalogItems reference the DiskImage, deletion fails with `FailedPrecondition`. Admin removes the referencing resources and retries.
+1. Admin calls `DiskImages/Delete`.
+2. The BEFORE UPDATE trigger on `disk_images` fires and queries `bare_metal_instances` for active references (`deletion_timestamp = 'epoch'`).
+3. If any exist, the trigger raises SQLSTATE `Z0003`. The DAO translates this to `FailedPrecondition` with a message identifying the referencing resource.
+4. Admin deletes or reprovisioned the referencing BareMetalInstances, then retries deletion.
 
 ### API Extensions
 
 **Modified gRPC messages:**
 
 `BareMetalInstanceSpec` (public and private):
-- Field 7 (`image`, type `BareMetalInstanceImage`) — removed, field number reserved.
-- Field 10 (`disk_image`, type `string`, `IMMUTABLE`) — added. References a DiskImage by ID.
+- `image` (`BareMetalInstanceImage`) — removed, field name reserved.
+- `disk_image` (`string`, `IMMUTABLE`) — added. References a DiskImage by ID.
 
 `BareMetalInstanceTemplateSpecDefaults` (public and private):
-- Field 1 (`image`, type `BareMetalInstanceImage`) — removed, field number reserved. No replacement: DiskImage defaults are carried on `BareMetalInstanceCatalogItem.field_definitions`.
+- `image` (`BareMetalInstanceImage`) — removed, field name reserved. No replacement: DiskImage defaults are carried on `BareMetalInstanceCatalogItem.field_definitions`.
 
 `BareMetalInstancesCreateResponse` (public and private):
-- Field 2 (`warnings`, type `repeated string`) — added. Carries non-fatal notices, matching the `ComputeInstancesCreateResponse` pattern. `PrivateBareMetalInstancesServer.Create()` populates warnings on the private response; the public server propagates them to the public response.
+- `warnings` (`repeated string`) — added. Carries non-fatal notices, matching the `ComputeInstancesCreateResponse` pattern.
 
 `BareMetalInstanceCatalogItemsCreateResponse` and `BareMetalInstanceCatalogItemsUpdateResponse` (public and private):
-- Field `warnings` (`repeated string`) — added. Carries non-fatal notices when `field_definitions` reference a DEPRECATED DiskImage. Populated by `validateFieldDefinitionsDiskImage()` and propagated from private to public server in the same pattern.
+- `warnings` (`repeated string`) — added. Carries non-fatal notices when `field_definitions` reference a DEPRECATED DiskImage.
 
 `BareMetalInstanceImage` message — removed from both public and private type protos.
 
@@ -152,39 +168,33 @@ Deferred to GA per [Graduation Criteria](#graduation-criteria): full user-facing
 // baremetal_instance_type.proto — modified fields only
 
 message BareMetalInstanceSpec {
-  // ... fields 1-6 unchanged ...
+  // existing fields unchanged ...
 
-  // Field 7 (image) removed.
-  reserved 7;
-  reserved "image";
-
-  // ... fields 8-9 unchanged (network_attachments, auto_external_ip_attachment) ...
+  reserved "image";  // image field removed
 
   // Reference to a DiskImage. Required for provisioning.
-  // The reconciler resolves source_ref at reconciliation time and injects it
-  // as imageURL in the template parameters.
-  optional string disk_image = 10 [(google.api.field_behavior) = IMMUTABLE];
+  optional string disk_image [(google.api.field_behavior) = IMMUTABLE];
 }
 
 // BareMetalInstanceImage message removed entirely.
 
 // public and private:
 message BareMetalInstancesCreateResponse {
-  BareMetalInstance object = 1;
+  BareMetalInstance object;
 
   // Non-fatal notices, e.g. when disk_image is DEPRECATED.
-  repeated string warnings = 2;
+  repeated string warnings;
 }
 
 // public and private catalog-item responses:
 message BareMetalInstanceCatalogItemsCreateResponse {
-  BareMetalInstanceCatalogItem object = 1;
-  repeated string warnings = 2;  // non-fatal notices when disk_image in field_definitions is DEPRECATED
+  BareMetalInstanceCatalogItem object;
+  repeated string warnings;  // non-fatal notices when disk_image in field_definitions is DEPRECATED
 }
 
 message BareMetalInstanceCatalogItemsUpdateResponse {
-  BareMetalInstanceCatalogItem object = 1;
-  repeated string warnings = 2;  // non-fatal notices when disk_image in field_definitions is DEPRECATED
+  BareMetalInstanceCatalogItem object;
+  repeated string warnings;  // non-fatal notices when disk_image in field_definitions is DEPRECATED
 }
 ```
 
@@ -192,9 +202,7 @@ message BareMetalInstanceCatalogItemsUpdateResponse {
 // baremetal_instance_template_type.proto — modified fields only
 
 message BareMetalInstanceTemplateSpecDefaults {
-  // Field 1 (image) removed. No DiskImage field on templates.
-  reserved 1;
-  reserved "image";
+  reserved "image";  // image field removed, no DiskImage field on templates
 }
 ```
 
@@ -357,9 +365,9 @@ This is a breaking API change (removal of `BareMetalInstanceSpec.image`). OSAC d
 - Any `BareMetalInstanceCatalogItem.field_definitions` carrying `spec.image` defaults must be updated to use `spec.disk_image` before upgrade; the `image` field is not recognized after upgrade.
 
 **Downgrade steps:**
-- Delete all BareMetalInstances created with `spec.disk_image` (these cannot be represented in the prior schema).
-- Revert the database migration: the down migration must recreate OSAC-2540's original `check_disk_image_not_in_use` function (covering only compute resources) and trigger before removing the BMaaS additions — removing the trigger entirely is incorrect, as compute resource deletion protection must remain.
-- Redeploy the prior service binary (reverts proto and server changes).
+1. Delete all BareMetalInstances created with `spec.disk_image` (these cannot be represented in the prior schema).
+2. Revert the database migration: the down migration must recreate OSAC-2540's original `check_disk_image_not_in_use` function (covering only compute resources) and trigger before removing the BMaaS additions — removing the trigger entirely is incorrect, as compute resource deletion protection must remain. Then drop `check_bare_metal_instance_disk_image_ref` and the `bare_metal_instances_disk_image` index.
+3. Redeploy the prior service binary (reverts proto and server changes).
 
 Existing provisioned BareMetalInstances (already RUNNING) at upgrade time have no `disk_image` reference. These instances are unaffected — running hosts do not require re-reconciliation and the reconciler only injects `imageURL` when `disk_image` is set.
 
