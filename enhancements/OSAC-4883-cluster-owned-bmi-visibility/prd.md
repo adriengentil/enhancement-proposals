@@ -36,7 +36,7 @@ BareMetalInstances (BMIs) provisioned for CaaS cluster worker nodes are currentl
 - As a Tenant Admin or Tenant User, I want BareMetalInstances backing my CaaS clusters to appear in my standard BareMetalInstance list and detail views, so that I can see the compute resources contributing to my quota and billing without asking an administrator.
 - As a Tenant Admin or Tenant User, I want to understand which operations I am permitted to perform on a cluster-owned BareMetalInstance, and receive a clear, actionable message when I attempt a restricted operation, so that I can operate within ownership constraints without encountering opaque failures.
 - As a Tenant Admin or Tenant User, I want the UI to disable or hide operations that are restricted for cluster-owned BareMetalInstances (such as delete or power actions), so that I can see at a glance what I can and cannot do before attempting an operation.
-- As a Tenant Admin or Tenant User, I want to perform any operations explicitly permitted by the cluster owner (for example, updating labels or annotations when the owner has granted that permission), so that I can organise and tag cluster-owned resources alongside my other BareMetalInstances.
+- As a Tenant Admin or Tenant User, I want to perform the operations that the cluster owner has explicitly permitted on a cluster-owned BareMetalInstance, so that I retain meaningful access to resources that are visible in my tenant.
 
 ### Cloud Provider Admin
 
@@ -58,6 +58,6 @@ BareMetalInstances (BMIs) provisioned for CaaS cluster worker nodes are currentl
 ## Provenance
 
 Authored: respond @ prd 0.11.3 - 9b25062, workspace main @ f0a8211
-Phases: draft, respond, respond
+Phases: draft, respond, respond, respond
 
-<!-- ai-workflow-provenance:{"schema_version":1,"provenance_kind":"session","workflow":"prd","workflow_version":"0.11.3","ai_workflows":"9b25062","source_repo":"f0a8211","source_repo_branch":"main","commits_behind_main":0,"commits_ahead_main":0,"main_ref":"main","phases":["draft","respond","respond"],"authoring_modes":["skill"],"context_changed":false,"origin_untracked":false} -->
+<!-- ai-workflow-provenance:{"schema_version":1,"provenance_kind":"session","workflow":"prd","workflow_version":"0.11.3","ai_workflows":"9b25062","source_repo":"f0a8211","source_repo_branch":"main","commits_behind_main":0,"commits_ahead_main":0,"main_ref":"main","phases":["draft","respond","respond","respond"],"authoring_modes":["skill"],"context_changed":false,"origin_untracked":false} -->
