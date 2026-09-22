@@ -27,6 +27,7 @@ BareMetalInstances (BMIs) provisioned for CaaS cluster worker nodes are currentl
 - Migration of existing system-tenant BMIs to owning tenants; no backward compatibility is required
 - A dedicated audit log or event store for ownership history — observable lifecycle events are the only event mechanism in scope
 - Automated cluster node lifecycle management (provisioning, decommissioning) — delivered by CaaS, not this feature
+- Detection of a deleted or missing owner resource and automated remediation — if the owning resource is deleted without first releasing ownership, the BMI's ownership state is not automatically updated; the owner is responsible for releasing or deleting the BMI
 
 ## User Stories
 
@@ -57,6 +58,6 @@ BareMetalInstances (BMIs) provisioned for CaaS cluster worker nodes are currentl
 ## Provenance
 
 Authored: respond @ prd 0.11.3 - 9b25062, workspace main @ f0a8211
-Phases: draft, respond
+Phases: draft, respond, respond
 
-<!-- ai-workflow-provenance:{"schema_version":1,"provenance_kind":"session","workflow":"prd","workflow_version":"0.11.3","ai_workflows":"9b25062","source_repo":"f0a8211","source_repo_branch":"main","commits_behind_main":0,"commits_ahead_main":0,"main_ref":"main","phases":["draft","respond"],"authoring_modes":["skill"],"context_changed":false,"origin_untracked":false} -->
+<!-- ai-workflow-provenance:{"schema_version":1,"provenance_kind":"session","workflow":"prd","workflow_version":"0.11.3","ai_workflows":"9b25062","source_repo":"f0a8211","source_repo_branch":"main","commits_behind_main":0,"commits_ahead_main":0,"main_ref":"main","phases":["draft","respond","respond"],"authoring_modes":["skill"],"context_changed":false,"origin_untracked":false} -->
