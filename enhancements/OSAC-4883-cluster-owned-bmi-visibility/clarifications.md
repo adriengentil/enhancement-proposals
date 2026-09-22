@@ -76,9 +76,9 @@ Anyone with private API access — both cloud provider admins and internal servi
 
 Private API must expose a way to set (and presumably clear) `spec.ownerRef`. Public API must not allow tenants to set or modify this field. Access control for the private API already gates who can call it.
 
-#### Decision (D4)
+#### Decision (D4) — amended
 
-`spec.ownerRef` can be set and cleared only via the private API. Any caller with private API access (cloud provider admin or internal service) may do so.
+`spec.ownerRef` is set at BMI creation time via the private API and cannot be cleared or transferred after creation. Ownership is permanent for the lifetime of the resource. Any caller with private API access (cloud provider admin or internal service) may create an owned BMI.
 
 ---
 
@@ -134,7 +134,7 @@ No "clear ownerRef before delete" step is needed. The BMI is deleted while owned
 
 #### Decision (D7) — amended
 
-The owner controller may delete a BMI while `spec.ownerRef` is still set — no intermediate release step is required. The owner may also choose to clear `spec.ownerRef` first (e.g., a CaaS "release node from cluster" workflow), returning the BMI to full tenant control before deletion or repurposing.
+Ownership cannot be cleared — the only way to end ownership is to delete the BMI. The owner controller deletes the BMI directly (no release step exists). Complexity reduction: removing the release/transfer capability eliminates the orphaned-ownership edge cases that a clearable ownerRef would create.
 
 ---
 
