@@ -16,7 +16,7 @@ BareMetalInstances (BMIs) provisioned for CaaS cluster worker nodes are currentl
 - Authorized callers (cloud provider admins and internal services) can create a BareMetalInstance with an ownership designation via the private API, specifying the owner identity and a configurable operation allowlist; ownership is permanent — it cannot be cleared or transferred after creation; tenants cannot set ownership; the owner resource must belong to the same tenant as the BareMetalInstance
 - The operation allowlist defines which tenant operations are permitted on an owned BMI; by default an owned BMI is fully read-only, and each permitted operation (including label and annotation updates) must be explicitly granted at creation time
 - The UI disables or hides operations that are restricted for owned BMIs and surfaces ownership information in the BMI detail view
-- Ownership establishment at creation produces an observable lifecycle event consumable by downstream systems
+- Ownership establishment at creation produces an observable lifecycle event consumable by downstream systems; BMI deletion, which ends ownership, is signalled by the existing BMI deletion event
 - E2E testing covering BMI visibility, allowed operations, and blocked operations for owned BMIs
 
 ## Out of Scope
@@ -55,6 +55,6 @@ BareMetalInstances (BMIs) provisioned for CaaS cluster worker nodes are currentl
 ## Provenance
 
 Authored: respond @ prd 0.11.3 - 9b25062, workspace main @ f0a8211
-Phases: draft, respond, respond, respond, respond, respond, respond
+Phases: draft, respond, respond, respond, respond, respond, respond, respond
 
-<!-- ai-workflow-provenance:{"schema_version":1,"provenance_kind":"session","workflow":"prd","workflow_version":"0.11.3","ai_workflows":"9b25062","source_repo":"f0a8211","source_repo_branch":"main","commits_behind_main":0,"commits_ahead_main":0,"main_ref":"main","phases":["draft","respond","respond","respond","respond","respond","respond"],"authoring_modes":["skill"],"context_changed":false,"origin_untracked":false} -->
+<!-- ai-workflow-provenance:{"schema_version":1,"provenance_kind":"session","workflow":"prd","workflow_version":"0.11.3","ai_workflows":"9b25062","source_repo":"f0a8211","source_repo_branch":"main","commits_behind_main":0,"commits_ahead_main":0,"main_ref":"main","phases":["draft","respond","respond","respond","respond","respond","respond","respond"],"authoring_modes":["skill"],"context_changed":false,"origin_untracked":false} -->

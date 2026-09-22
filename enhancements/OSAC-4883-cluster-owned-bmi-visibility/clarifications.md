@@ -74,7 +74,7 @@ Anyone with private API access — both cloud provider admins and internal servi
 
 #### Impact
 
-Private API must expose a way to set (and presumably clear) `spec.ownerRef`. Public API must not allow tenants to set or modify this field. Access control for the private API already gates who can call it.
+Private API must expose a way to set `spec.ownerRef` at BMI creation time. Public API must not allow tenants to set or modify this field. Access control for the private API already gates who can call it.
 
 #### Decision (D4) — amended
 
@@ -162,15 +162,15 @@ Does OSAC have an existing mechanism to log or emit events for ownership changes
 
 #### Answer
 
-If something already exists, reuse it and emit an event on ownerRef set/clear. No backward compatibility requirements.
+If something already exists, reuse it and emit an event when ownerRef is set. No backward compatibility requirements.
 
 #### Impact (resolved by code inspection)
 
-OSAC has a Watch-based event pipeline: fulfillment service emits `privatev1.Event` objects consumed by the metering service, which publishes CloudEvents 1.0 to Kafka. This is the only structured event infrastructure currently in place — no separate audit log exists. Ownership set/clear events should piggyback on this pipeline. No backward compatibility constraints apply (existing `system`-tenant BMIs need no migration).
+OSAC has a Watch-based event pipeline: fulfillment service emits `privatev1.Event` objects consumed by the metering service, which publishes CloudEvents 1.0 to Kafka. This is the only structured event infrastructure currently in place — no separate audit log exists. Ownership establishment events should piggyback on this pipeline. No backward compatibility constraints apply (existing `system`-tenant BMIs need no migration).
 
-#### Decision (D9)
+#### Decision (D9) — amended
 
-Ownership changes (`spec.ownerRef` set and cleared) must emit events via the existing Watch-based event pipeline. No backward compatibility with existing `system`-tenant BMIs is required.
+Ownership establishment (`spec.ownerRef` set at creation) must emit an event via the existing Watch-based event pipeline. No "ownership cleared" event exists — BMI deletion is the ownership-end signal, covered by the existing BMI deletion event. No backward compatibility with existing `system`-tenant BMIs is required.
 
 ---
 
