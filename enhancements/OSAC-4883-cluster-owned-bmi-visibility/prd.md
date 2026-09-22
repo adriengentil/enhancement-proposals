@@ -16,15 +16,16 @@ BareMetalInstances (BMIs) provisioned for CaaS cluster worker nodes are currentl
 - A per-resource ownership designation for BareMetalInstances: an authorized caller marks a BMI as owned by a specific resource (e.g., a cluster) and configures which operations tenants are permitted to perform on it
 - A configurable, per-ownership-instance operation allowlist — established when ownership is set — that defines which tenant operations are permitted; by default an owned BMI is fully read-only, and each permitted operation (including label and annotation updates) must be explicitly granted
 - Ownership is set and cleared by authorized callers (cloud provider admins and internal services) via the private API; tenants cannot set or modify ownership
+- An owner resource must belong to the same tenant as the BareMetalInstance it owns — cross-tenant ownership is not permitted
 - The UI disables or hides operations that are restricted for owned BMIs, and surfaces ownership information in the BMI detail view
-- Ownership changes (ownership set, ownership released) emit events via the existing OSAC Watch-based event pipeline
+- Ownership changes (ownership set, ownership released) produce observable lifecycle events consumable by downstream systems
 - E2E testing covering BMI visibility, allowed operations, and blocked operations for owned BMIs
 
 ## Out of Scope
 
 - Extension of the ownership model to other OSAC resource types (ComputeInstance, VirtualNetwork, etc.) — designated as future work
 - Migration of existing system-tenant BMIs to owning tenants; no backward compatibility is required
-- A dedicated audit log or event store for ownership history — the existing Watch event pipeline is the only event mechanism in scope
+- A dedicated audit log or event store for ownership history — observable lifecycle events are the only event mechanism in scope
 - Automated cluster node lifecycle management (provisioning, decommissioning) — delivered by CaaS, not this feature
 
 ## User Stories
@@ -43,8 +44,7 @@ BareMetalInstances (BMIs) provisioned for CaaS cluster worker nodes are currentl
 
 ## Assumptions
 
-- The existing OSAC Watch-based event pipeline can be extended to emit ownership lifecycle events (ownership set, ownership released) without requiring separate event infrastructure.
-- The BareMetalInstance ownership model is designed with extensibility to other resource types in mind, but no other resource type is in scope for this feature.
+- Downstream systems that consume ownership lifecycle events can be extended to handle new ownership event types without requiring separate event infrastructure.
 
 ## Dependencies
 
@@ -56,6 +56,7 @@ BareMetalInstances (BMIs) provisioned for CaaS cluster worker nodes are currentl
 
 ## Provenance
 
-Authored: draft @ prd 0.11.3 - 9b25062, workspace main @ f0a8211
+Authored: respond @ prd 0.11.3 - 9b25062, workspace main @ f0a8211
+Phases: draft, respond
 
-<!-- ai-workflow-provenance:{"schema_version":1,"provenance_kind":"session","workflow":"prd","workflow_version":"0.11.3","ai_workflows":"9b25062","source_repo":"f0a8211","source_repo_branch":"main","commits_behind_main":0,"commits_ahead_main":0,"main_ref":"main","phases":["draft"],"authoring_modes":["skill"],"context_changed":false,"origin_untracked":false} -->
+<!-- ai-workflow-provenance:{"schema_version":1,"provenance_kind":"session","workflow":"prd","workflow_version":"0.11.3","ai_workflows":"9b25062","source_repo":"f0a8211","source_repo_branch":"main","commits_behind_main":0,"commits_ahead_main":0,"main_ref":"main","phases":["draft","respond"],"authoring_modes":["skill"],"context_changed":false,"origin_untracked":false} -->

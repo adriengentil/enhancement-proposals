@@ -42,7 +42,7 @@ The operation allowlist is not hardcoded — it is configured at the time `spec.
 
 #### Decision (D2) — amended
 
-The operation allowlist is configurable per ownership instance. It is specified by the caller when setting `spec.ownerRef` via the private API. Labels and annotations are always permitted regardless of the configured allowlist. All other operations on the BMI are subject to the allowlist.
+The operation allowlist is configurable per ownership instance. It is specified by the caller when setting `spec.ownerRef` via the private API. All operations on the BMI — including label and annotation updates — are subject to the allowlist. See D10 for the default (empty allowlist = fully read-only).
 
 ---
 
