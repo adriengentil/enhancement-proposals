@@ -34,7 +34,7 @@ When a BMI is cluster-owned, the description blocks "destructive operations" but
 
 #### Answer
 
-The operation allowlist is not hardcoded — it is configured at the time `spec.ownerRef` is set (via the private API). The caller that sets ownership also specifies which operations tenants are permitted to perform. Labels and annotations are always updatable regardless of the allowlist.
+The operation allowlist is not hardcoded — it is configured at the time `spec.ownerRef` is set (via the private API). The caller that sets ownership also specifies which operations tenants are permitted to perform. *(Position later refined by D10: the default allowlist is empty — fully read-only — and every permitted operation, including label and annotation updates, must be explicitly granted by the caller.)*
 
 #### Impact
 
@@ -148,11 +148,11 @@ The UI reflects the operation allowlist — for example, the "delete" button is 
 
 #### Impact
 
-UI work is in scope. The UI must surface `spec.ownerRef` presence and disable or hide operations blocked by the allowlist (delete, lifecycle actions). Labels and annotations remain editable.
+UI work is in scope. The UI must surface `spec.ownerRef` presence and disable or hide operations blocked by the allowlist (delete, lifecycle actions). Label/annotation editing is available only when explicitly included in the ownership allowlist.
 
 #### Decision (D8)
 
-The UI is in scope. Restricted operations (delete, lifecycle) are disabled/hidden for cluster-owned BMIs. The ownerRef is surfaced in the BMI detail view. Label/annotation editing remains available.
+The UI is in scope. Restricted operations (delete, lifecycle) are disabled/hidden for cluster-owned BMIs. The ownerRef is surfaced in the BMI detail view. Label/annotation editing is available only when explicitly included in the ownership allowlist.
 
 ---
 
